@@ -1,0 +1,17 @@
+{
+  "source_sha256": "9dee08c0e08297c52f199bf5008399158966ad9d00e7bd9c89fe09884fe1b908",
+  "cues": {
+    "ignite": {
+      "start": 4.1,
+      "duration": 0.85
+    },
+    "exhale": {
+      "start": 8.16,
+      "duration": 1.15
+    },
+    "silent": {
+      "duration": 0.08
+    }
+  },
+  "ogg_comment_version": 3
+}

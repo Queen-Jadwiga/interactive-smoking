@@ -1,0 +1,16 @@
+[
+  {
+    "source": "anomaly_weapons/hud_hands_animation/zzzzzzzzzzzzzzz_anens_cig.omf",
+    "source_sha256": "8326092c3b32f3fe33acd20d1626ebc3fac9f7f512bf9794f2d4aeb70268c8e2",
+    "output": "anomaly_weapons/hud_hands_animation/zzzzzzzzzzzzzzzz_is_smoking.omf",
+    "output_sha256": "90401a2adec7997eaa8dc58b0d45c66a8a632773e5d2a44832a4b5d5c0a71e50",
+    "preserve_original_motions": false
+  },
+  {
+    "source": "dynamics/weapons/wpn_eat/injectors/cigar1.omf",
+    "source_sha256": "8c06255d482525058356ea351b786b0dded1e9366720b9745ad497527153ddef",
+    "output": "dynamics/weapons/wpn_eat/injectors/cigar1.omf",
+    "output_sha256": "f3f64d8b62ac8f2d3b7d49965fd4c278af2f7df4c93fd66e529d607bee3af195",
+    "preserve_original_motions": true
+  }
+]

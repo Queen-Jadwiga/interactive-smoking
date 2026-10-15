@@ -1,0 +1,292 @@
+-- Interactive Smoking 0.9: original controller, existing GAMMA/FDDA assets.
+local HUD, SPEED = "is_smoking_hud", 2
+local packs = {cigarettes=true,cigarettes_lucky=true,cigarettes_russian=true}
+local session, pending, light, smoke, consuming, flash
+local sounds={}
+local installed = false
+local options = {drags=8,burn_seconds=120,ember_light=true,smoke_particles=true,sound_effects=true,lighting_sound_ms=3686,exhale_ms=2100}
+local function now() return time_global() end
+local function log(s) printf("[InteractiveSmoking 0.9] %s",tostring(s)) end
+local function tip(s)
+    if actor_menu and actor_menu.set_msg then actor_menu.set_msg(1,s,4) end
+    log(s)
+end
+local function hud_free() return actor_menu and actor_menu.is_hud_free and actor_menu.is_hud_free() end
+local function ready()
+    return db and db.actor and db.actor:alive() and not
+        (IsMoveState and (IsMoveState("mcClimb") or IsMoveState("mcSprint")))
+end
+local function owned(obj)
+    if not obj or not db or not db.actor or not packs[obj:section()] then return false end
+    local p=obj:parent()
+    return p and p:id()==db.actor:id() and obj:get_remaining_uses()>0
+end
+local function stop_sound(slot)
+    if sounds[slot] then pcall(function() sounds[slot]:stop() end);sounds[slot]=nil end
+end
+local function play_sound(slot,path)
+    stop_sound(slot)
+    if not getFS():exist("$game_sounds$",path..".ogg") then log("AUDIO missing "..path);return end
+    local ok,result=pcall(function()
+        local sound=sound_object(path)
+        sound:play(db.actor,0,sound_object.s2d)
+        return sound
+    end)
+    if ok then sounds[slot]=result;log("AUDIO "..slot)
+    else log("AUDIO failed "..tostring(result)) end
+end
+local function ordinary_item_use(obj)
+    if not obj then return end
+    local sec=obj:section()
+    if packs[sec] and consuming~=sec then log("ORDINARY_USE "..sec.."; interactive: F8 or Smoke interactively menu entry") end
+    -- Match native replacement of a previous use sound when another item
+    -- with use_sound is consumed. Replay only our silent-routed sections.
+    if ini_sys:line_exist(sec,"use_sound") then stop_sound("regular") end
+    if consuming==sec then return end
+    if ini_sys:line_exist(sec,"is_smoking_regular_sound") and
+       ini_sys:r_string(sec,"use_sound")=="interface\\is_smoking\\silent" then
+        play_sound("regular",ini_sys:r_string(sec,"is_smoking_regular_sound"))
+    end
+end
+local function cleanup_fx()
+    if flash then pcall(function() flash.enabled=false;flash:update() end);flash=nil end
+    stop_sound("ignite");stop_sound("exhale")
+    if light then pcall(function() light.enabled=false;light:update() end);light=nil end
+    if smoke then pcall(function() smoke:stop() end);smoke=nil end
+end
+function stop(reason)
+    local had=session~=nil
+    session=nil;pending=nil;consuming=nil;cleanup_fx()
+    if had then pcall(game.stop_hud_motion);log("STOP "..tostring(reason)) end
+end
+function active() return session~=nil or pending~=nil end
+local function play(kind)
+    local ms=game.play_hud_motion(2,HUD,"anm_is_"..kind,false,SPEED)
+    if kind~="idle" and (type(ms)~="number" or ms<=0) then error("Hand animation unavailable: "..kind) end
+    session.phase=kind;session.since=now()
+    local active_frames,total_frames
+    if kind=="light" then active_frames,total_frames=421,481
+    elseif kind=="puff" then active_frames,total_frames=211,271 end
+    session.finish=active_frames and now()+ms*active_frames/total_frames or nil
+    if kind=="light" then session.charge_at=now()+ms*281/481 end
+    log("MOTION "..kind.." ms="..tostring(ms))
+end
+local function preflight()
+    if not game or not game.play_hud_motion or not game.motion_exists or not game.hud_motion_allowed then
+        return false,"Required Modded Exes HUD APIs are missing."
+    end
+    if not ini_sys:section_exist(HUD) then return false,"Interactive Smoking HUD section is missing." end
+    for sec in pairs(packs) do
+        if not ini_sys:line_exist(sec,"use_sound") or ini_sys:r_string(sec,"use_sound")~="interface\\is_smoking\\silent" then
+            return false,"Interactive Smoking audio patch is overridden. Put this build below cigarette patches in MO2."
+        end
+    end
+    local model=ini_sys:r_string(HUD,"item_visual")
+    local path=model:lower():sub(-4)==".ogf" and model or model..".ogf"
+    -- Native motion_exists loads the visual; never call it on a missing model.
+    if not getFS():exist("$game_meshes$",path) then return false,"Cigarette HUD model missing: "..path end
+    for _,m in ipairs({"is_item_light","is_item_idle","is_item_puff"}) do
+        if not game.motion_exists(path,m) then return false,"Cigarette clip missing: "..m..". Check MO2 cigar1.omf conflicts and attach the X-Ray log." end
+    end
+    return true
+end
+local function create_light()
+    if not options.ember_light or not script_light then return end
+    local ok,l=pcall(function()
+        local x=script_light();x.enabled=false;x.shadow=false;x.volumetric=false
+        x.hud_mode=true;x.type=1;x.range=0.18;x.color=fcolor():set(0,0,0,1)
+        return x
+    end)
+    if ok then light=l else log("LIGHT unavailable: "..tostring(l)) end
+end
+local function ignition_flash(s)
+    -- Reproduce FDDA's two camera-relative point-light pulses without its
+    -- shared ea_light state/time events or any optional addon hooks.
+    if not options.ignition_flash or not script_light then return end
+    local elapsed=now()-s.since-options.lighting_sound_ms
+    local pulse
+    if elapsed>=0 and elapsed<150 then pulse={1,0.9,0.2,1,0.1,0.25,0.2,elapsed/150}
+    elseif elapsed>=400 and elapsed<1700 then pulse={0.8,0.5,0,3,0.5,0.7,0.1,(elapsed-400)/1300} end
+    if not pulse then
+        if flash then flash.enabled=false;flash:update() end
+        return
+    end
+    if not flash then
+        flash=script_light();flash.type=1;flash.hud_mode=false
+        flash.shadow=true;flash.volumetric=false
+    end
+    local d=device();local a=pulse;local fade=1-a[8]
+    flash.range=a[4]*fade
+    flash.color=fcolor():set(a[1],a[2],a[3],a[5]*fade)
+    flash:set_position(vector():set(d.cam_pos.x+d.cam_dir.x*a[7],d.cam_pos.y+d.cam_dir.y*a[7]-a[6],d.cam_pos.z+d.cam_dir.z*a[7]))
+    flash.enabled=true;flash:update()
+end
+local function effects()
+    local s=session
+    if light then
+        local ok,err=pcall(function()
+            local d=device();local p
+            for _,b in ipairs({"bip01_r_finger11","bip01_r_finger1","r_hand"}) do
+                local id=db.actor:bone_id(b,true)
+                if id and id~=65535 then p=db.actor:bone_position(b,true);break end
+            end
+            if not p then light.enabled=false;light:update();return end
+            local lit=s.paid or (s.phase=="light" and now()-s.since>=4300)
+            local heat=s.phase=="puff" and math.min(1,(now()-s.since)/450) or 0
+            local power=lit and (0.12+heat*0.33) or 0
+            light:set_position(vector():set(p.x+d.cam_dir.x*0.045,p.y+d.cam_dir.y*0.045,p.z+d.cam_dir.z*0.045))
+            light.color=fcolor():set(power,power*0.28,power*0.04,1);light.enabled=power>0;light:update()
+        end)
+        if not ok then log("LIGHT failed: "..tostring(err));pcall(function() light.enabled=false;light:update() end);light=nil end
+    end
+    if s.phase=="light" then
+        local ok,err=pcall(ignition_flash,s)
+        if not ok then
+            if flash then pcall(function() flash.enabled=false;flash:update() end);flash=nil end
+            options.ignition_flash=false;log("IGNITION FLASH unavailable: "..tostring(err))
+        end
+    elseif flash then flash.enabled=false;flash:update() end
+    if s.phase=="light" and not s.ignited and now()-s.since>=options.lighting_sound_ms then
+        s.ignited=true
+        if options.sound_effects then play_sound("ignite","interface\\is_smoking\\ignite") end
+    end
+    if s.phase=="puff" and not s.exhaled and now()-s.since>=options.exhale_ms then
+        s.exhaled=true
+        log("EXHALE elapsed_ms="..tostring(now()-s.since))
+        if options.sound_effects then play_sound("exhale","interface\\is_smoking\\exhale") end
+        if options.smoke_particles then
+            if smoke then pcall(function() smoke:stop() end);smoke=nil end
+            local ok,p=pcall(function()
+                local x=particles_object("vehiclefx\\exhaust_3");local d=device()
+                x:set_direction(d.cam_dir)
+                x:play_at_pos(vector():set(d.cam_pos.x+d.cam_dir.x*0.3,d.cam_pos.y-0.2,d.cam_pos.z+d.cam_dir.z*0.3))
+                return x
+            end)
+            if ok then smoke=p;s.smoke_until=now()+1150 else log("SMOKE unavailable: "..tostring(p)) end
+        end
+    end
+    if smoke and s.smoke_until and now()>=s.smoke_until then pcall(function() smoke:stop() end);smoke=nil end
+end
+local function charge()
+    local obj=level.object_by_id(session.id)
+    if not owned(obj) then return false end
+    local before=obj:get_remaining_uses()
+    consuming=obj:section()
+    local ok,err=pcall(function() db.actor:eat(obj) end)
+    consuming=nil
+    if not ok then log("CONSUME failed: "..tostring(err));return false end
+    -- Native Eat is synchronous. The object remains valid through this call.
+    local after=obj:get_remaining_uses()
+    if after~=before-1 then log("CONSUME mismatch "..before.." -> "..tostring(after));return false end
+    session.paid=true;session.lit_at=now()
+    log("CONSUME one pack use "..session.section.." "..before.." -> "..after)
+    return true
+end
+local function begin(obj)
+    if not owned(obj) or not ready() or not hud_free() then log("START rejected: ownership, actor state or menu busy");return false end
+    local ok,why=preflight()
+    if not ok then tip(why);return false end
+    if not game.hud_motion_allowed() then tip("Finish the current action before smoking.");return false end
+    session={id=obj:id(),section=obj:section(),remaining=options.drags,map=level.name(),paid=false}
+    play("light");create_light()
+    tip("Fire: drag. Reload/F8: extinguish. Menus end smoking.")
+    return true
+end
+function request(obj)
+    if active() or not owned(obj) then log("REQUEST rejected: session active or unsupported/empty/foreign pack");return false end
+    log("REQUEST "..obj:section().." id="..tostring(obj:id()))
+    pending={id=obj:id(),expires=now()+2500}
+    if hide_hud_inventory then hide_hud_inventory() end
+    return true
+end
+local function tick()
+    if pending then
+        if now()>pending.expires or not ready() then log("REQUEST expired or actor unavailable");pending=nil;return end
+        if hud_free() then
+            local id=pending.id;pending=nil
+            local ok,err=pcall(function() begin(level.object_by_id(id)) end)
+            if not ok then stop("start_error");tip("Smoking could not start; see X-Ray log.");log(err) end
+        end
+    end
+    local s=session
+    if not s then return end
+    if not ready() or not hud_free() or level.name()~=s.map then stop("interrupted");return end
+    local ok,err=pcall(function()
+        if s.paid and now()-s.lit_at>=options.burn_seconds*1000 then stop("burned_out");return end
+        -- Restore 0.1.0's earlier native-use/sound trigger while preserving
+        -- 0.1.1's full preparation and resting pose. Charge only once.
+        if s.phase=="light" and not s.paid and now()>=s.charge_at then
+            if not charge() then stop("consumption_failed");return end
+        end
+        if s.finish and now()>=s.finish then
+            if s.phase=="light" and not s.paid then stop("consumption_failed");return end
+            if s.phase=="puff" and s.remaining<=0 then stop("finished");return end
+            play("idle")
+        end
+        effects()
+    end)
+    if not ok then stop("update_error");log(err) end
+end
+local function key(dik,bind,disabled,flags)
+    if disabled or not hud_free() or not ready() then return end
+    if dik==DIK_keys.DIK_F8 then
+        flags.ret_value=false
+        if active() then stop("extinguished") else
+            local chosen
+            db.actor:iterate_inventory(function(_,obj)
+                if owned(obj) and (not chosen or obj:id()<chosen:id()) then chosen=obj end
+            end,nil)
+            if chosen then request(chosen) else tip("Carry a standard cigarette pack to smoke.") end
+        end
+        return
+    end
+    if not session then return end
+    if bind==key_bindings.kWPN_RELOAD or dik==DIK_keys.DIK_ESCAPE then
+        stop("extinguished");flags.ret_value=false;return
+    end
+    if bind==key_bindings.kWPN_FIRE then
+        flags.ret_value=false
+        if session.phase=="idle" then
+            session.remaining=session.remaining-1;session.exhaled=false
+            local ok,err=pcall(play,"puff")
+            if ok then tip("Drags remaining: "..session.remaining) else stop("puff_error");log(err) end
+        end
+    elseif bind==key_bindings.kWPN_ZOOM or bind==key_bindings.kUSE or
+        (dik>=DIK_keys.DIK_F1 and dik<=DIK_keys.DIK_F4) then flags.ret_value=false end
+end
+local function held(dik,bind,disabled,flags)
+    if session and not disabled and hud_free() and (bind==key_bindings.kWPN_FIRE or bind==key_bindings.kWPN_ZOOM or bind==key_bindings.kUSE) then flags.ret_value=false end
+end
+function eligible(obj,bag,mode)
+    return not active() and mode=="inventory" and bag=="actor_bag" and owned(obj)
+end
+function on_game_start()
+    if installed then return end
+    installed=true
+    options.drags=math.floor(math.max(1,math.min(50,ini_sys:r_float("is_smoking_settings","drags"))))
+    options.burn_seconds=math.max(10,ini_sys:r_float("is_smoking_settings","burn_seconds"))
+    options.ignition_flash=ini_sys:r_bool("is_smoking_settings","ignition_flash")
+    options.ember_light=ini_sys:r_bool("is_smoking_settings","ember_light")
+    options.smoke_particles=ini_sys:r_bool("is_smoking_settings","smoke_particles")
+    options.sound_effects=ini_sys:r_bool("is_smoking_settings","sound_effects")
+    options.lighting_sound_ms=ini_sys:r_float("is_smoking_settings","lighting_sound_ms")
+    options.exhale_ms=ini_sys:r_float("is_smoking_settings","exhale_ms")
+    -- Suppress only the duplicate default audiovisual FX of our native Eat.
+    local original=actor_effects.play_item_fx
+    actor_effects.play_item_fx=function(sec,...)
+        if consuming and sec==consuming then log("FX_SUPPRESS "..sec);return end
+        return original(sec,...)
+    end
+    RegisterScriptCallback("actor_on_update",tick)
+    RegisterScriptCallback("actor_on_item_use",ordinary_item_use)
+    RegisterScriptCallback("on_before_key_press",key)
+    RegisterScriptCallback("on_before_key_hold",held)
+    RegisterScriptCallback("on_before_key_release",held)
+    RegisterScriptCallback("save_state",function() stop("save") end)
+    RegisterScriptCallback("load_state",function() stop("load");stop_sound("regular") end)
+    RegisterScriptCallback("actor_on_net_destroy",function() stop("actor_destroyed");stop_sound("regular") end)
+    if getFS():exist("$game_scripts$","custom_functor_autoinject.script") then
+        custom_functor_autoinject.add_functor("is_smoking",eligible,function() return "st_is_smoke" end,nil,request,true)
+    end
+    log("READY; F8 fallback; optional addons not required")
+end

@@ -1,0 +1,14 @@
+; Native ActorCondition plays use_sound independently of actor_effects.
+; Route the supported packs through a quiet native cue. Our use callback
+; replays the original native cue for ordinary (noninteractive) use.
+![cigarettes]
+use_sound = interface\is_smoking\silent
+is_smoking_regular_sound = interface\inv_smoke
+
+![cigarettes_lucky]
+use_sound = interface\is_smoking\silent
+is_smoking_regular_sound = interface\inv_smoke
+
+![cigarettes_russian]
+use_sound = interface\is_smoking\silent
+is_smoking_regular_sound = interface\inv_smoke
