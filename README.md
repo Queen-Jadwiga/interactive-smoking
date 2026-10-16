@@ -1,4 +1,4 @@
-# Interactive Smoking — v0.9 beta
+# Interactive Smoking — v0.9.1
 
 Light a cigarette, hold it between drags, and choose when to take each puff. Includes an ignition flash, glowing ember, smoke and exhale cues.
 
@@ -11,18 +11,21 @@ Light a cigarette, hold it between drags, and choose when to take each puff. Inc
 
 ## Install
 
-Download the `end-user` branch using **Code → Download ZIP**, or the source ZIP from the v0.9 beta release, and install through Mod Organizer 2. If MO2 does not detect the package automatically, select the folder containing `gamedata` as the data directory.
+Both `main` and `end-user` contain the same working v0.9.1 end-user package. Download either branch with **Code → Download ZIP**, then install the ZIP through Mod Organizer 2. If MO2 does not detect the package automatically, select the folder containing `gamedata` as the data directory.
 
 Put Interactive Smoking **below FDDA and cigarette patches** in MO2's left pane so its animation files and audio routing win conflicts. Replace any earlier Interactive Smoking installation completely. Enable only one version, then restart the game.
 
 ## Controls
 
 1. Carry a supported nonempty pack. Right-click it and choose **Smoke interactively (beta)**. Alternatively close all menus, stand still, and press **F8**.
-2. Let the lighting sequence finish, approximately seven seconds.
-3. Tap your bound **Fire** key for a drag. Holding Fire does not repeat drags.
-4. Press **Reload**, **F8**, or **Escape** to extinguish.
+2. Let the lighting sequence finish and the hand lower automatically (approximately nine seconds total).
+3. **Hold RMB** to raise and hold the cigarette. Release without clicking to lower silently. A release during the raising animation queues lowering at its end.
+4. **Click LMB while holding RMB** to smoke, then lower automatically. A click during raising queues one drag; releasing RMB before raising finishes cancels it. Once a drag starts, releasing RMB lets it finish. Release and press RMB again for the next raise.
+5. Press **Reload**, **F8**, or **Escape** to extinguish.
 
 Ordinary **Use** and FDDA's **Enjoy cigarettes** remain separate actions; select the interactive entry or F8 for this mod's controls.
+
+Middle mouse button ashing is not included in v0.9.1. After lighting, raise the cigarette with RMB and use LMB while holding RMB to take a drag.
 
 ## Behavior and settings
 
@@ -34,7 +37,7 @@ Settings are in `gamedata/configs/mod_system_is_smoking.ltx`: drag count, burn d
 
 ## Troubleshooting
 
-If nothing happens, confirm you selected **Smoke interactively (beta)** or F8. If another action is playing, let it finish. Follow any missing-animation or audio-conflict message and check MO2 priority. For problems, report your executable version, enabled cigarette addons, what happened, and attach `appdata/logs/xray_<name>.log`. Relevant entries begin `[InteractiveSmoking 0.9]`.
+If nothing happens, confirm you selected **Smoke interactively (beta)** or F8. If another action is playing, let it finish. Follow any missing-animation or audio-conflict message and check MO2 priority. For problems, report your executable version, enabled cigarette addons, what happened, and attach `appdata/logs/xray_<name>.log`. Relevant entries begin `[InteractiveSmoking 0.9.1]`.
 
 ## Uninstall
 
@@ -44,4 +47,3 @@ Extinguish, save, exit completely, and disable the mod in MO2. Consumed pack use
 
 Interaction/controller code by Queen-Jadwiga. Animation and short sound clips derive from the supplied **FDDA Redone — lizzardman** assets; upstream asset credits remain with their creators. Existing GAMMA/FDDA models, textures and native particle resources are referenced. No scripts from the three optional addons are bundled.
 
-This beta preserves the accepted 0.1.4 behavior. The author tested ignition, manual drags, lowering and stopping in game; this is not a claim of compatibility with every GAMMA profile.

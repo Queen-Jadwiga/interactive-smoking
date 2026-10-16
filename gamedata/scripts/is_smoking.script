@@ -1,12 +1,12 @@
--- Interactive Smoking 0.9: original controller, existing GAMMA/FDDA assets.
+-- Interactive Smoking v0.9.1: selective raising and delayed exhale.
 local HUD, SPEED = "is_smoking_hud", 2
 local packs = {cigarettes=true,cigarettes_lucky=true,cigarettes_russian=true}
 local session, pending, light, smoke, consuming, flash
 local sounds={}
 local installed = false
-local options = {drags=8,burn_seconds=120,ember_light=true,smoke_particles=true,sound_effects=true,lighting_sound_ms=3686,exhale_ms=2100}
+local options = {drags=8,burn_seconds=120,ember_light=true,smoke_particles=true,sound_effects=true,lighting_sound_ms=3686,exhale_ms=1000}
 local function now() return time_global() end
-local function log(s) printf("[InteractiveSmoking 0.9] %s",tostring(s)) end
+local function log(s) printf("[InteractiveSmoking 0.9.1] %s",tostring(s)) end
 local function tip(s)
     if actor_menu and actor_menu.set_msg then actor_menu.set_msg(1,s,4) end
     log(s)
@@ -62,11 +62,12 @@ end
 function active() return session~=nil or pending~=nil end
 local function play(kind)
     local ms=game.play_hud_motion(2,HUD,"anm_is_"..kind,false,SPEED)
-    if kind~="idle" and (type(ms)~="number" or ms<=0) then error("Hand animation unavailable: "..kind) end
+    if kind~="idle" and kind~="raised" and (type(ms)~="number" or ms<=0) then error("Hand animation unavailable: "..kind) end
     session.phase=kind;session.since=now()
     local active_frames,total_frames
     if kind=="light" then active_frames,total_frames=421,481
-    elseif kind=="puff" then active_frames,total_frames=211,271 end
+    elseif kind=="raise" or kind=="lower" then active_frames,total_frames=121,181
+    elseif kind=="puff" then active_frames,total_frames=121,181 end
     session.finish=active_frames and now()+ms*active_frames/total_frames or nil
     if kind=="light" then session.charge_at=now()+ms*281/481 end
     log("MOTION "..kind.." ms="..tostring(ms))
@@ -85,7 +86,7 @@ local function preflight()
     local path=model:lower():sub(-4)==".ogf" and model or model..".ogf"
     -- Native motion_exists loads the visual; never call it on a missing model.
     if not getFS():exist("$game_meshes$",path) then return false,"Cigarette HUD model missing: "..path end
-    for _,m in ipairs({"is_item_light","is_item_idle","is_item_puff"}) do
+    for _,m in ipairs({"is_item_light","is_item_idle","is_item_drag","is_item_raise","is_item_raised","is_item_lower"}) do
         if not game.motion_exists(path,m) then return false,"Cigarette clip missing: "..m..". Check MO2 cigar1.omf conflicts and attach the X-Ray log." end
     end
     return true
@@ -150,9 +151,9 @@ local function effects()
         s.ignited=true
         if options.sound_effects then play_sound("ignite","interface\\is_smoking\\ignite") end
     end
-    if s.phase=="puff" and not s.exhaled and now()-s.since>=options.exhale_ms then
-        s.exhaled=true
-        log("EXHALE elapsed_ms="..tostring(now()-s.since))
+    if s.exhale_at and now()>=s.exhale_at then
+        s.exhale_at=nil;s.exhaled=true;s.exhale_done=now()+1150
+        log("EXHALE after_lower_ms="..tostring(now()-s.lowered_at))
         if options.sound_effects then play_sound("exhale","interface\\is_smoking\\exhale") end
         if options.smoke_particles then
             if smoke then pcall(function() smoke:stop() end);smoke=nil end
@@ -189,7 +190,7 @@ local function begin(obj)
     if not game.hud_motion_allowed() then tip("Finish the current action before smoking.");return false end
     session={id=obj:id(),section=obj:section(),remaining=options.drags,map=level.name(),paid=false}
     play("light");create_light()
-    tip("Fire: drag. Reload/F8: extinguish. Menus end smoking.")
+    tip("Hold RMB: raise. LMB while raised: smoke. Reload/F8: extinguish.")
     return true
 end
 function request(obj)
@@ -198,6 +199,10 @@ function request(obj)
     pending={id=obj:id(),expires=now()+2500}
     if hide_hud_inventory then hide_hud_inventory() end
     return true
+end
+local function puff()
+    session.remaining=session.remaining-1;session.exhaled=false;session.queued_puff=false;session.raising=false
+    play("puff");tip("Drags remaining: "..session.remaining)
 end
 local function tick()
     if pending then
@@ -220,10 +225,23 @@ local function tick()
         end
         if s.finish and now()>=s.finish then
             if s.phase=="light" and not s.paid then stop("consumption_failed");return end
-            if s.phase=="puff" and s.remaining<=0 then stop("finished");return end
-            play("idle")
+            if s.phase=="light" then
+                s.raising=false;s.queued_puff=false;play("lower")
+            elseif s.phase=="puff" then
+                s.lowered_at=now();s.exhale_at=now()+options.exhale_ms
+                play("idle")
+            elseif s.phase=="raise" then
+                if not s.raising then s.queued_puff=false;play("lower")
+                elseif s.queued_puff then puff()
+                else play("raised") end
+            else play("idle") end
         end
         effects()
+        -- Keep the last drag alive through its delayed exhale and smoke tail.
+        if s.exhale_done and now()>=s.exhale_done then
+            s.exhale_done=nil
+            if s.remaining<=0 then stop("finished") end
+        end
     end)
     if not ok then stop("update_error");log(err) end
 end
@@ -241,22 +259,44 @@ local function key(dik,bind,disabled,flags)
         return
     end
     if not session then return end
-    if bind==key_bindings.kWPN_RELOAD or dik==DIK_keys.DIK_ESCAPE then
+    if (bind==key_bindings.kWPN_RELOAD and dik~=337 and dik~=338 and dik~=339) or dik==DIK_keys.DIK_ESCAPE then
         stop("extinguished");flags.ret_value=false;return
     end
-    if bind==key_bindings.kWPN_FIRE then
+    -- Raw mouse codes follow the supplied FDDA input manager (337..339).
+    -- Bind aliases preserve remapped fire/zoom as well. Always swallow all three.
+    local fire=dik==337 or bind==key_bindings.kWPN_FIRE
+    local zoom=dik==338 or bind==key_bindings.kWPN_ZOOM
+    -- Reserve MMB during smoking; ashing is deferred.
+    if dik==339 then flags.ret_value=false;return end
+    if fire or zoom then
         flags.ret_value=false
-        if session.phase=="idle" then
-            session.remaining=session.remaining-1;session.exhaled=false
-            local ok,err=pcall(play,"puff")
-            if ok then tip("Drags remaining: "..session.remaining) else stop("puff_error");log(err) end
-        end
-    elseif bind==key_bindings.kWPN_ZOOM or bind==key_bindings.kUSE or
+        local ok,err=pcall(function()
+            if zoom then
+                if session.phase=="idle" and not session.exhale_at and not session.exhale_done then
+                    session.raising=true;session.queued_puff=false;play("raise")
+                end
+            elseif fire and session.raising then
+                if session.phase=="raised" then puff()
+                elseif session.phase=="raise" then session.queued_puff=true end
+            end
+        end)
+        if not ok then stop("input_error");log(err) end
+    elseif bind==key_bindings.kUSE or
         (dik>=DIK_keys.DIK_F1 and dik<=DIK_keys.DIK_F4) then flags.ret_value=false end
 end
 local function held(dik,bind,disabled,flags)
-    if session and not disabled and hud_free() and (bind==key_bindings.kWPN_FIRE or bind==key_bindings.kWPN_ZOOM or bind==key_bindings.kUSE) then flags.ret_value=false end
+    if session and (dik==337 or dik==338 or dik==339 or bind==key_bindings.kWPN_FIRE or bind==key_bindings.kWPN_ZOOM or bind==key_bindings.kUSE) then flags.ret_value=false end
 end
+local function released(dik,bind,disabled,flags)
+    held(dik,bind,disabled,flags)
+    if not session or not (dik==338 or bind==key_bindings.kWPN_ZOOM) then return end
+    session.raising=false;session.queued_puff=false
+    if session.phase=="raised" then
+        local ok,err=pcall(play,"lower")
+        if not ok then stop("lower_error");log(err) end
+    end
+end
+
 function eligible(obj,bag,mode)
     return not active() and mode=="inventory" and bag=="actor_bag" and owned(obj)
 end
@@ -281,7 +321,7 @@ function on_game_start()
     RegisterScriptCallback("actor_on_item_use",ordinary_item_use)
     RegisterScriptCallback("on_before_key_press",key)
     RegisterScriptCallback("on_before_key_hold",held)
-    RegisterScriptCallback("on_before_key_release",held)
+    RegisterScriptCallback("on_before_key_release",released)
     RegisterScriptCallback("save_state",function() stop("save") end)
     RegisterScriptCallback("load_state",function() stop("load");stop_sound("regular") end)
     RegisterScriptCallback("actor_on_net_destroy",function() stop("actor_destroyed");stop_sound("regular") end)
