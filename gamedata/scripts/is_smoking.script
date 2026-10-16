@@ -1,12 +1,12 @@
--- Interactive Smoking v0.9.2: selective raising and delayed exhale.
+-- Interactive Smoking v0.9.3: selective raising and delayed exhale.
 local HUD, SPEED = "is_smoking_hud", 2
 local packs = {cigarettes=true,cigarettes_lucky=true,cigarettes_russian=true}
 local session, pending, light, smoke, consuming, flash
 local sounds={}
 local installed = false
-local options = {drags=8,burn_seconds=120,ember_light=true,smoke_particles=true,sound_effects=true,lighting_sound_ms=3686,exhale_ms=1000}
+local options = {drags=8,burn_seconds=120,ember_light=true,smoke_particles=true,sound_effects=true,lighting_sound_ms=3686,exhale_ms=1000,smoke_emitters=2,smoke_duration_ms=1600}
 local function now() return time_global() end
-local function log(s) printf("[InteractiveSmoking 0.9.2] %s",tostring(s)) end
+local function log(s) printf("[InteractiveSmoking 0.9.3] %s",tostring(s)) end
 local function tip(s)
     if actor_menu and actor_menu.set_msg then actor_menu.set_msg(1,s,4) end
     log(s)
@@ -48,11 +48,27 @@ local function ordinary_item_use(obj)
         play_sound("regular",ini_sys:r_string(sec,"is_smoking_regular_sound"))
     end
 end
+local function stop_smoke()
+    if smoke then
+        for _,p in ipairs(smoke) do pcall(function() p:stop() end) end
+        smoke=nil
+    end
+end
+local function hands_empty()
+    return not db.actor:active_item() and not db.actor:active_detector()
+end
+local function item_selection(bind)
+    if bind==nil then return false end
+    for _,name in ipairs({"kWPN_1","kWPN_2","kWPN_3","kWPN_4","kWPN_5","kWPN_6","kWPN_NEXT","kNEXT_SLOT","kPREV_SLOT","kARTEFACT","kDETECTOR"}) do
+        if key_bindings[name] and bind==key_bindings[name] then return true end
+    end
+    return false
+end
 local function cleanup_fx()
     if flash then pcall(function() flash.enabled=false;flash:update() end);flash=nil end
     stop_sound("ignite");stop_sound("exhale")
     if light then pcall(function() light.enabled=false;light:update() end);light=nil end
-    if smoke then pcall(function() smoke:stop() end);smoke=nil end
+    stop_smoke()
 end
 function stop(reason)
     local had=session~=nil
@@ -67,7 +83,8 @@ local function play(kind)
     local active_frames,total_frames
     if kind=="light" then active_frames,total_frames=421,481
     elseif kind=="raise" or kind=="lower" then active_frames,total_frames=121,181
-    elseif kind=="puff" then active_frames,total_frames=121,181 end
+    elseif kind=="puff" then active_frames,total_frames=121,181
+    elseif kind=="dispose" then active_frames,total_frames=61,121 end
     session.finish=active_frames and now()+ms*active_frames/total_frames or nil
     if kind=="light" then session.charge_at=now()+ms*281/481 end
     log("MOTION "..kind.." ms="..tostring(ms))
@@ -86,7 +103,7 @@ local function preflight()
     local path=model:lower():sub(-4)==".ogf" and model or model..".ogf"
     -- Native motion_exists loads the visual; never call it on a missing model.
     if not getFS():exist("$game_meshes$",path) then return false,"Cigarette HUD model missing: "..path end
-    for _,m in ipairs({"is_item_light","is_item_idle","is_item_drag","is_item_raise","is_item_raised","is_item_lower"}) do
+    for _,m in ipairs({"is_item_light","is_item_idle","is_item_drag","is_item_raise","is_item_raised","is_item_lower","is_item_dispose"}) do
         if not game.motion_exists(path,m) then return false,"Cigarette clip missing: "..m..". Check MO2 cigar1.omf conflicts and attach the X-Ray log." end
     end
     return true
@@ -122,6 +139,17 @@ local function ignition_flash(s)
     flash:set_position(vector():set(d.cam_pos.x+d.cam_dir.x*a[7],d.cam_pos.y+d.cam_dir.y*a[7]-a[6],d.cam_pos.z+d.cam_dir.z*a[7]))
     flash.enabled=true;flash:update()
 end
+local function mouth_position(d)
+    -- Camera-relative mouth origin, including pitch. The old world-Y offset
+    -- placed the emitter too far below the view, particularly when looking up.
+    local f,u=d.cam_dir,d.cam_top
+    return vector():set(d.cam_pos.x+f.x*0.35-u.x*0.06,
+        d.cam_pos.y+f.y*0.35-u.y*0.06,d.cam_pos.z+f.z*0.35-u.z*0.06)
+end
+local function schedule_exhale(s,source)
+    s.lowered_at=now();s.exhale_at=now()+options.exhale_ms;s.exhaled=false
+    log("EXHALE queued source="..source)
+end
 local function effects()
     local s=session
     if light then
@@ -152,21 +180,38 @@ local function effects()
         if options.sound_effects then play_sound("ignite","interface\\is_smoking\\ignite") end
     end
     if s.exhale_at and now()>=s.exhale_at then
-        s.exhale_at=nil;s.exhaled=true;s.exhale_done=now()+1150
+        s.exhale_at=nil;s.exhaled=true;s.exhale_done=now()+options.smoke_duration_ms
         log("EXHALE after_lower_ms="..tostring(now()-s.lowered_at))
         if options.sound_effects then play_sound("exhale","interface\\is_smoking\\exhale") end
         if options.smoke_particles then
-            if smoke then pcall(function() smoke:stop() end);smoke=nil end
-            local ok,p=pcall(function()
-                local x=particles_object("vehiclefx\\exhaust_3");local d=device()
-                x:set_direction(d.cam_dir)
-                x:play_at_pos(vector():set(d.cam_pos.x+d.cam_dir.x*0.3,d.cam_pos.y-0.2,d.cam_pos.z+d.cam_dir.z*0.3))
-                return x
-            end)
-            if ok then smoke=p;s.smoke_until=now()+1150 else log("SMOKE unavailable: "..tostring(p)) end
+            stop_smoke();smoke={}
+            for i=1,options.smoke_emitters do
+                local x
+                local ok,err=pcall(function()
+                    x=particles_object("vehiclefx\\exhaust_3");local d=device()
+                    x:set_direction(d.cam_dir)
+                    x:play_at_pos(mouth_position(d),false)
+                end)
+                if ok then smoke[#smoke+1]=x
+                else
+                    if x then pcall(function() x:stop() end) end
+                    log("SMOKE unavailable: "..tostring(err))
+                end
+            end
+            s.smoke_until=now()+options.smoke_duration_ms
+            log("SMOKE emitters="..#smoke.." duration_ms="..options.smoke_duration_ms)
         end
     end
-    if smoke and s.smoke_until and now()>=s.smoke_until then pcall(function() smoke:stop() end);smoke=nil end
+    if smoke and s.smoke_until then
+        if now()>=s.smoke_until then stop_smoke()
+        else
+            local d=device();local pos=mouth_position(d)
+            local velocity=vector():set(0,0,0)
+            for _,p in ipairs(smoke) do
+                p:set_direction(d.cam_dir);p:move_to(pos,velocity)
+            end
+        end
+    end
 end
 local function charge()
     local obj=level.object_by_id(session.id)
@@ -184,13 +229,13 @@ local function charge()
     return true
 end
 local function begin(obj)
-    if not owned(obj) or not ready() or not hud_free() then log("START rejected: ownership, actor state or menu busy");return false end
+    if not owned(obj) or not ready() or not hud_free() or not hands_empty() then log("START rejected: ownership, actor state or menu busy");return false end
     local ok,why=preflight()
     if not ok then tip(why);return false end
     if not game.hud_motion_allowed() then tip("Finish the current action before smoking.");return false end
     session={id=obj:id(),section=obj:section(),remaining=options.drags,map=level.name(),paid=false}
     play("light");create_light()
-    tip("Hold RMB: raise. LMB while raised: smoke. Reload/F8: extinguish.")
+    tip("Hold RMB: raise. LMB while raised: smoke. Reload: toss. F8: cancel.")
     return true
 end
 function request(obj)
@@ -211,12 +256,12 @@ local function tick()
         if now()>p.expires then
             pending=nil
             log("REQUEST timeout wait_ms="..tostring(now()-p.requested_at).." hud_free="..tostring(hud_free()))
-            tip("Finish the current action before smoking.")
+            tip(p.holstered and "Could not clear the held item; smoking cancelled." or "Finish the current action before smoking.")
             return
         end
         if hud_free() then
             -- Inventory can close before the native HUD animation gate clears.
-            -- Keep the original deadline and never clear another action's state.
+            -- Preserve its deadline; holstering gets its own bounded wait afterward.
             local ok,err=pcall(function()
                 if game and game.hud_motion_allowed and not game.hud_motion_allowed() then
                     if not p.wait_logged then
@@ -224,6 +269,19 @@ local function tick()
                     end
                     return
                 end
+                if not p.holstered then
+                    local ok,why=preflight()
+                    if not ok then pending=nil;tip(why);return end
+                    p.holstered=true
+                    if not hands_empty() then
+                        log("HOLSTER requested slot="..tostring(db.actor:active_slot()))
+                        db.actor:activate_slot(0)
+                        db.actor:hide_detector(false)
+                        p.expires=now()+2500
+                        return
+                    end
+                end
+                if not hands_empty() then return end
                 pending=nil
                 log("REQUEST ready wait_ms="..tostring(now()-p.requested_at))
                 begin(level.object_by_id(p.id))
@@ -233,9 +291,9 @@ local function tick()
     end
     local s=session
     if not s then return end
-    if not ready() or not hud_free() or level.name()~=s.map then stop("interrupted");return end
+    if not ready() or not hud_free() or not hands_empty() or level.name()~=s.map then stop("interrupted");return end
     local ok,err=pcall(function()
-        if s.paid and now()-s.lit_at>=options.burn_seconds*1000 then stop("burned_out");return end
+        if s.paid and now()-s.lit_at>=options.burn_seconds*1000 then s.discard=s.discard or "burned_out" end
         -- Restore 0.1.0's earlier native-use/sound trigger while preserving
         -- 0.1.1's full preparation and resting pose. Charge only once.
         if s.phase=="light" and not s.paid and now()>=s.charge_at then
@@ -243,11 +301,13 @@ local function tick()
         end
         if s.finish and now()>=s.finish then
             if s.phase=="light" and not s.paid then stop("consumption_failed");return end
-            if s.phase=="light" then
-                s.raising=false;s.queued_puff=false;play("lower")
+            if s.phase=="dispose" then stop(s.discard or "discarded");return
+            elseif s.phase=="light" then
+                s.raising=false;s.queued_puff=false;s.lighting_lower=true;play("lower")
             elseif s.phase=="puff" then
-                s.lowered_at=now();s.exhale_at=now()+options.exhale_ms
-                play("idle")
+                schedule_exhale(s,"drag");play("idle")
+            elseif s.phase=="lower" and s.lighting_lower then
+                s.lighting_lower=nil;schedule_exhale(s,"lighting");play("idle")
             elseif s.phase=="raise" then
                 if not s.raising then s.queued_puff=false;play("lower")
                 elseif s.queued_puff then puff()
@@ -258,7 +318,14 @@ local function tick()
         -- Keep the last drag alive through its delayed exhale and smoke tail.
         if s.exhale_done and now()>=s.exhale_done then
             s.exhale_done=nil
-            if s.remaining<=0 then stop("finished") end
+            if s.remaining<=0 then s.discard=s.discard or "finished" end
+        end
+        if s.discard and s.phase~="dispose" then
+            s.raising=false;s.queued_puff=false
+            if s.phase=="raised" then play("lower")
+            elseif s.phase=="idle" and not s.exhale_at and not s.exhale_done then
+                log("DISPOSE "..s.discard);play("dispose")
+            end
         end
     end)
     if not ok then stop("update_error");log(err) end
@@ -276,24 +343,27 @@ local function key(dik,bind,disabled,flags)
         end
         return
     end
+    if active() and item_selection(bind) then flags.ret_value=false;return end
     if not session then return end
-    if (bind==key_bindings.kWPN_RELOAD and dik~=337 and dik~=338 and dik~=339) or dik==DIK_keys.DIK_ESCAPE then
-        stop("extinguished");flags.ret_value=false;return
+    if dik==DIK_keys.DIK_ESCAPE then stop("extinguished");flags.ret_value=false;return end
+    if bind==key_bindings.kWPN_RELOAD and dik~=337 and dik~=338 then
+        flags.ret_value=false
+        if not session.paid then stop("cancelled_before_lighting")
+        else session.discard=session.discard or "manual";session.raising=false;session.queued_puff=false end
+        return
     end
     -- Raw mouse codes follow the supplied FDDA input manager (337..339).
-    -- Bind aliases preserve remapped fire/zoom as well. Always swallow all three.
+    -- Bind aliases preserve remapped fire/zoom as well. Swallow fire and zoom while smoking.
     local fire=dik==337 or bind==key_bindings.kWPN_FIRE
     local zoom=dik==338 or bind==key_bindings.kWPN_ZOOM
-    -- Reserve MMB during smoking; ashing is deferred.
-    if dik==339 then flags.ret_value=false;return end
     if fire or zoom then
         flags.ret_value=false
         local ok,err=pcall(function()
             if zoom then
-                if session.phase=="idle" and not session.exhale_at and not session.exhale_done then
+                if session.phase=="idle" and not session.discard and session.remaining>0 and not session.exhale_at and not session.exhale_done then
                     session.raising=true;session.queued_puff=false;play("raise")
                 end
-            elseif fire and session.raising then
+            elseif fire and session.raising and not session.discard and session.remaining>0 then
                 if session.phase=="raised" then puff()
                 elseif session.phase=="raise" then session.queued_puff=true end
             end
@@ -303,7 +373,8 @@ local function key(dik,bind,disabled,flags)
         (dik>=DIK_keys.DIK_F1 and dik<=DIK_keys.DIK_F4) then flags.ret_value=false end
 end
 local function held(dik,bind,disabled,flags)
-    if session and (dik==337 or dik==338 or dik==339 or bind==key_bindings.kWPN_FIRE or bind==key_bindings.kWPN_ZOOM or bind==key_bindings.kUSE) then flags.ret_value=false end
+    if active() and item_selection(bind) then flags.ret_value=false end
+    if session and (dik==337 or dik==338 or bind==key_bindings.kWPN_FIRE or bind==key_bindings.kWPN_ZOOM or bind==key_bindings.kUSE) then flags.ret_value=false end
 end
 local function released(dik,bind,disabled,flags)
     held(dik,bind,disabled,flags)
@@ -329,6 +400,8 @@ function on_game_start()
     options.sound_effects=ini_sys:r_bool("is_smoking_settings","sound_effects")
     options.lighting_sound_ms=ini_sys:r_float("is_smoking_settings","lighting_sound_ms")
     options.exhale_ms=ini_sys:r_float("is_smoking_settings","exhale_ms")
+    options.smoke_emitters=math.floor(math.max(1,math.min(4,ini_sys:r_float("is_smoking_settings","smoke_emitters"))))
+    options.smoke_duration_ms=math.max(1150,math.min(3000,ini_sys:r_float("is_smoking_settings","smoke_duration_ms")))
     -- Suppress only the duplicate default audiovisual FX of our native Eat.
     local original=actor_effects.play_item_fx
     actor_effects.play_item_fx=function(sec,...)
@@ -340,7 +413,11 @@ function on_game_start()
     RegisterScriptCallback("on_before_key_press",key)
     RegisterScriptCallback("on_before_key_hold",held)
     RegisterScriptCallback("on_before_key_release",released)
-    RegisterScriptCallback("save_state",function() stop("save") end)
+    RegisterScriptCallback("save_state",function()
+        -- Do not serialize the temporary session, and do not mutate it when
+        -- saving. Loading still stops it; saving alone must not cancel a drag.
+        if session then log("SAVE continuing phase="..session.phase.." remaining="..session.remaining) end
+    end)
     RegisterScriptCallback("load_state",function() stop("load");stop_sound("regular") end)
     RegisterScriptCallback("actor_on_net_destroy",function() stop("actor_destroyed");stop_sound("regular") end)
     if getFS():exist("$game_scripts$","custom_functor_autoinject.script") then

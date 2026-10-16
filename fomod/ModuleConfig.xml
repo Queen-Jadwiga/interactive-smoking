@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
-  <moduleName>Interactive Smoking v0.9.2</moduleName>
+  <moduleName>Interactive Smoking v0.9.3</moduleName>
   <requiredInstallFiles>
     <folder source="gamedata" destination="gamedata"/>
     <file source="README.md" destination="README.md"/>
