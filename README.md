@@ -1,6 +1,10 @@
-# Interactive Smoking — v0.9.1
+# Interactive Smoking — v0.9.2
 
 Light a cigarette, hold it between drags, and choose when to take each puff. Includes an ignition flash, glowing ember, smoke and exhale cues.
+
+## Changes in v0.9.2
+
+Smoking requests wait up to 2.5 seconds for the native HUD animation gate to clear after inventory closes. The X-Ray log records waiting, readiness and timeout events. This build does not add ashing.
 
 ## Requirements
 
@@ -11,7 +15,7 @@ Light a cigarette, hold it between drags, and choose when to take each puff. Inc
 
 ## Install
 
-Both `main` and `end-user` contain the same working v0.9.1 end-user package. Download either branch with **Code → Download ZIP**, then install the ZIP through Mod Organizer 2. If MO2 does not detect the package automatically, select the folder containing `gamedata` as the data directory.
+Both `main` and `end-user` contain the same v0.9.2 package. Download either branch with **Code → Download ZIP**, then install it through Mod Organizer 2. If MO2 does not detect the package automatically, select the folder containing `gamedata` as the data directory.
 
 Put Interactive Smoking **below FDDA and cigarette patches** in MO2's left pane so its animation files and audio routing win conflicts. Replace any earlier Interactive Smoking installation completely. Enable only one version, then restart the game.
 
@@ -25,7 +29,7 @@ Put Interactive Smoking **below FDDA and cigarette patches** in MO2's left pane 
 
 Ordinary **Use** and FDDA's **Enjoy cigarettes** remain separate actions; select the interactive entry or F8 for this mod's controls.
 
-Middle mouse button ashing is not included in v0.9.1. After lighting, raise the cigarette with RMB and use LMB while holding RMB to take a drag.
+Middle mouse button ashing is not included in v0.9.2. After lighting, raise the cigarette with RMB and use LMB while holding RMB to take a drag.
 
 ## Behavior and settings
 
@@ -37,7 +41,7 @@ Settings are in `gamedata/configs/mod_system_is_smoking.ltx`: drag count, burn d
 
 ## Troubleshooting
 
-If nothing happens, confirm you selected **Smoke interactively (beta)** or F8. If another action is playing, let it finish. Follow any missing-animation or audio-conflict message and check MO2 priority. For problems, report your executable version, enabled cigarette addons, what happened, and attach `appdata/logs/xray_<name>.log`. Relevant entries begin `[InteractiveSmoking 0.9.1]`.
+If nothing happens, confirm you selected **Smoke interactively (beta)** or F8. If another action is playing, let it finish. Follow any missing-animation or audio-conflict message and check MO2 priority. For problems, report your executable version, enabled cigarette addons, what happened, and attach `appdata/logs/xray_<name>.log`. Relevant entries begin `[InteractiveSmoking 0.9.2]`.
 
 ## Uninstall
 
