@@ -1,4 +1,4 @@
--- Interactive Smoking v0.9.1: selective raising and delayed exhale.
+-- Interactive Smoking v0.9.2: selective raising and delayed exhale.
 local HUD, SPEED = "is_smoking_hud", 2
 local packs = {cigarettes=true,cigarettes_lucky=true,cigarettes_russian=true}
 local session, pending, light, smoke, consuming, flash
@@ -6,7 +6,7 @@ local sounds={}
 local installed = false
 local options = {drags=8,burn_seconds=120,ember_light=true,smoke_particles=true,sound_effects=true,lighting_sound_ms=3686,exhale_ms=1000}
 local function now() return time_global() end
-local function log(s) printf("[InteractiveSmoking 0.9.1] %s",tostring(s)) end
+local function log(s) printf("[InteractiveSmoking 0.9.2] %s",tostring(s)) end
 local function tip(s)
     if actor_menu and actor_menu.set_msg then actor_menu.set_msg(1,s,4) end
     log(s)
@@ -196,7 +196,7 @@ end
 function request(obj)
     if active() or not owned(obj) then log("REQUEST rejected: session active or unsupported/empty/foreign pack");return false end
     log("REQUEST "..obj:section().." id="..tostring(obj:id()))
-    pending={id=obj:id(),expires=now()+2500}
+    pending={id=obj:id(),requested_at=now(),expires=now()+2500}
     if hide_hud_inventory then hide_hud_inventory() end
     return true
 end
@@ -206,10 +206,28 @@ local function puff()
 end
 local function tick()
     if pending then
-        if now()>pending.expires or not ready() then log("REQUEST expired or actor unavailable");pending=nil;return end
+        local p=pending
+        if not ready() then log("REQUEST cancelled: actor unavailable");pending=nil;return end
+        if now()>p.expires then
+            pending=nil
+            log("REQUEST timeout wait_ms="..tostring(now()-p.requested_at).." hud_free="..tostring(hud_free()))
+            tip("Finish the current action before smoking.")
+            return
+        end
         if hud_free() then
-            local id=pending.id;pending=nil
-            local ok,err=pcall(function() begin(level.object_by_id(id)) end)
+            -- Inventory can close before the native HUD animation gate clears.
+            -- Keep the original deadline and never clear another action's state.
+            local ok,err=pcall(function()
+                if game and game.hud_motion_allowed and not game.hud_motion_allowed() then
+                    if not p.wait_logged then
+                        p.wait_logged=true;log("REQUEST waiting: HUD motion blocked")
+                    end
+                    return
+                end
+                pending=nil
+                log("REQUEST ready wait_ms="..tostring(now()-p.requested_at))
+                begin(level.object_by_id(p.id))
+            end)
             if not ok then stop("start_error");tip("Smoking could not start; see X-Ray log.");log(err) end
         end
     end
