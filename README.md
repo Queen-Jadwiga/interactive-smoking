@@ -1,27 +1,49 @@
-# Interactive Smoking — v0.9 beta
+# Interactive Smoking — v0.9.1
 
-Interactive cigarette smoking for S.T.A.L.K.E.R. Anomaly / GAMMA, by Queen-Jadwiga.
+Light a cigarette, hold it between drags, and choose when to take each puff. Includes an ignition flash, glowing ember, smoke and exhale cues.
 
-## Branches
+## Requirements
 
-- **main**: runtime package plus development scripts, mocked checks and source notes.
-- **end-user**: installable mod files and player documentation only. Players should download this branch or the v0.9 beta release.
+- S.T.A.L.K.E.R. GAMMA with its existing FDDA Redone cigarette models, textures and HUD assets.
+- Demonized modded executables: tested on **October 11, 2026**. Other builds have not been verified.
 
-See [player instructions](README_USER.md) for requirements, installation, controls, optional addons and limits.
+**Living Devices, Cigarette Ember Light and Smoke Longer are optional.** Interactive sessions provide their own effects. This beta supports **Cigarettes, Lucky cigarettes and Russian cigarettes**. Cigars and other tobacco items are planned for later.
 
-## Accepted baseline
+## Install
 
-v0.9 promotes the user-tested **0.1.4** build. Runtime changes are version/label metadata only. Both OMF animation files and all three Ogg cues remain byte-identical. Later 0.1.5 activation diagnostics are not included. The October 15 user test log records three sessions, one pack use per session, exhale events at 2100–2116ms and clean stop reasons; no smoking-controller error was observed. User video confirms the accepted motion and ignition effect. Raw logs/video are not stored in this repository.
+Both `main` and `end-user` contain the same working v0.9.1 end-user package. Download either branch with **Code → Download ZIP**, then install the ZIP through Mod Organizer 2. If MO2 does not detect the package automatically, select the folder containing `gamedata` as the data directory.
 
-## Development
+Put Interactive Smoking **below FDDA and cigarette patches** in MO2's left pane so its animation files and audio routing win conflicts. Replace any earlier Interactive Smoking installation completely. Enable only one version, then restart the game.
 
-Python asset checks require NumPy, SciPy and FFmpeg/FFprobe; the controller fixture runs with texlua (Lua 5.3). Game code remains compatible with Lua 5.1 syntax. Obtain the source FDDA Redone assets separately; local workstation paths in historical source notes are evidence references, not distributed dependencies.
+## Controls
 
-```sh
-texlua development/controller_fixtures.lua .
-python development/check_assets.py /path/to/FDDA-Redone/gamedata
-python development/check_audio.py
-python development/package_release.py /path/to/Interactive_Smoking_0.9_Beta.zip --end-user
-```
+1. Carry a supported nonempty pack. Right-click it and choose **Smoke interactively (beta)**. Alternatively close all menus, stand still, and press **F8**.
+2. Let the lighting sequence finish and the hand lower automatically (approximately nine seconds total).
+3. **Hold RMB** to raise and hold the cigarette. Release without clicking to lower silently. A release during the raising animation queues lowering at its end.
+4. **Click LMB while holding RMB** to smoke, then lower automatically. A click during raising queues one drag; releasing RMB before raising finishes cancels it. Once a drag starts, releasing RMB lets it finish. Release and press RMB again for the next raise.
+5. Press **Reload**, **F8**, or **Escape** to extinguish.
 
-See [source notes](development/SOURCE_NOTES.md) for engine/source evidence, development history and runtime limitations. Mocked and binary checks do not substitute for in-game testing. Cigars and other tobacco types are outside this beta.
+Ordinary **Use** and FDDA's **Enjoy cigarettes** remain separate actions; select the interactive entry or F8 for this mod's controls.
+
+Middle mouse button ashing is not included in v0.9.1. After lighting, raise the cigarette with RMB and use LMB while holding RMB to take a drag.
+
+## Behavior and settings
+
+One pack use is consumed roughly 4.7 seconds into lighting. Normal cigarette bonuses and penalties apply once. The default session permits eight drags and burns out after two minutes. Cancelling before consumption keeps the pack use; extinguishing after lighting wastes the remainder.
+
+Opening menus, saving, loading, dying, changing maps, sprinting or climbing ends the session. There is no persistent half-smoked cigarette or shrinking model. All three packs currently share the same cigarette visual.
+
+Settings are in `gamedata/configs/mod_system_is_smoking.ltx`: drag count, burn duration, ember light, ignition flash, smoke, sound and cue timing. F8 is a fixed fallback key in this beta. Ordinary cigarette use retains its baseline use recording.
+
+## Troubleshooting
+
+If nothing happens, confirm you selected **Smoke interactively (beta)** or F8. If another action is playing, let it finish. Follow any missing-animation or audio-conflict message and check MO2 priority. For problems, report your executable version, enabled cigarette addons, what happened, and attach `appdata/logs/xray_<name>.log`. Relevant entries begin `[InteractiveSmoking 0.9.1]`.
+
+## Uninstall
+
+Extinguish, save, exit completely, and disable the mod in MO2. Consumed pack uses are not refunded.
+
+## Credits
+
+Interaction/controller code by Queen-Jadwiga. Animation and short sound clips derive from the supplied **FDDA Redone — lizzardman** assets; upstream asset credits remain with their creators. Existing GAMMA/FDDA models, textures and native particle resources are referenced. No scripts from the three optional addons are bundled.
+
