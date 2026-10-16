@@ -1,11 +1,16 @@
 ; Existing GAMMA/FDDA cigarette HUD. No new inventory class or battery system.
 [is_smoking_hud]:item_ea_cigarettes_orig_hud
+; Move hands and the attached cigarette together: 3 cm closer, 1.5 cm higher.
+; FDDA originals use 0, 0, 0.0405. Keep both aspect ratios consistent.
+hands_position = 0.0, 0.015, 0.0105
+hands_position_16x9 = 0.0, 0.015, 0.0105
 anm_is_light = is_hands_light, is_item_light
 anm_is_idle = is_hands_idle, is_item_idle
 anm_is_puff = is_hands_drag, is_item_drag
 anm_is_raise = is_hands_raise, is_item_raise
 anm_is_raised = is_hands_raised, is_item_raised
 anm_is_lower = is_hands_lower, is_item_lower
+anm_is_dispose = is_hands_dispose, is_item_dispose
 
 [is_smoking_settings]
 drags = 8
@@ -17,3 +22,7 @@ lighting_sound_ms = 3686
 ; Delay after the drag has returned to the lowered position.
 exhale_ms = 1000
 ignition_flash = true
+
+; Two native smoke emitters per exhale; adjustable from 1 to 4.
+smoke_emitters = 2
+smoke_duration_ms = 1600
